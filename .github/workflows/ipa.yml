@@ -107,8 +107,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ytuhd:
+    name: Build YTUHD (macOS)
+    if: ${{ inputs.ytuhd }}
+    runs-on: macos-latest
+
+    steps:
+      - name: Install Dependencies
+        run: |
+          brew install make ldid meson ninja
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-src: 'https://github.com/roothide/theos'
+          theos-sdks: 'https://github.com/Tonwalter888/iOS-16.5-SDK'
+          theos-sdks-branch: 'main'
+
+      - name: Clone headers
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git "$THEOS/include/YouTubeHeader"
+          git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git "$THEOS/include/PSHeader"
+
+      - name: Clone YTUHD
+        run: git clone --quiet --depth=1 --recurse-submodules https://github.com/PoomSmart/YTUHD.git
+
+      - name: Build YTUHD
+        run: |
+          cd YTUHD
+          make libvpx dav1d
+          make clean package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOAD=1
+          mv packages/*.deb ${{ github.workspace }}/ytuhd.deb
+
+      - name: Upload YTUHD deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: ytuhd-deb
+          path: ytuhd.deb
+          if-no-files-found: error
+
   build:
     name: Build IPA with tweaks
+    needs: ytuhd
+    if: ${{ !cancelled() && (needs.ytuhd.result == 'success' || needs.ytuhd.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -241,10 +284,6 @@ jobs:
         if: ${{ inputs.youpip }}
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
     
-      - name: Clone YTUHD
-        if: ${{ inputs.ytuhd }}
-        run: git clone --quiet --depth=1 --recurse-submodules https://github.com/PoomSmart/YTUHD.git
-           
       - name: Clone Return-YouTube-Dislikes
         if: ${{ inputs.ryd }}
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
@@ -307,14 +346,12 @@ jobs:
           make clean package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
           mv packages/*.deb ${{ github.workspace }}/youpip.deb
 
-      - name: Build YTUHD
+      - name: Download YTUHD deb (built on macOS)
         if: ${{ inputs.ytuhd }}
-        run: |
-          cd YTUHD
-          brew install meson ninja
-          make libvpx dav1d
-          make clean package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOAD=1
-          mv packages/*.deb ${{ github.workspace }}/ytuhd.deb
+        uses: actions/download-artifact@v4
+        with:
+          name: ytuhd-deb
+          path: ${{ github.workspace }}
 
       - name: Build Return-YouTube-Dislikes
         if: ${{ inputs.ryd }}
